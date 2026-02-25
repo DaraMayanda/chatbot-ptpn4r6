@@ -12,10 +12,14 @@ function tentukanKategori(keluhan) {
     return 'Lainnya'; 
 }
 
-// Inisialisasi WhatsApp Client - Versi Anti-Block Cloud
+// Inisialisasi WhatsApp Client - Versi Stabil dengan Cache Remote
 const client = new Client({
     authStrategy: new LocalAuth(),
-    authTimeoutMs: 0, // Menunggu proses otentikasi tanpa batas waktu
+    authTimeoutMs: 0,
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    },
     puppeteer: {
         handleSIGTERM: false,
         args: [
@@ -28,7 +32,6 @@ const client = new Client({
             '--single-process', 
             '--disable-gpu'
         ],
-        // Menyamarkan bot sebagai browser biasa agar tidak diblokir WhatsApp
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
     }
 });
