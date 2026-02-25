@@ -12,16 +12,18 @@ function tentukanKategori(keluhan) {
     return 'Lainnya'; 
 }
 
-// Inisialisasi WhatsApp Client - Versi Stabil dengan Cache Remote
+// Inisialisasi WhatsApp Client - Konfigurasi Paling Tangguh
 const client = new Client({
     authStrategy: new LocalAuth(),
-    authTimeoutMs: 0,
+    takeoverOnConflict: true, // Mengambil alih koneksi jika terputus/dijeda
+    authTimeoutMs: 60000, // Memberi waktu 1 menit untuk proses login
     webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
     },
     puppeteer: {
         handleSIGTERM: false,
+        executablePath: '/usr/bin/google-chrome-stable', // Memaksa server menggunakan Chrome yang terinstall
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -36,27 +38,35 @@ const client = new Client({
     }
 });
 
-// Link Gambar untuk QR agar mudah discan
+// Event QR Code
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
-    
     console.log('\n-----------------------------------------------------');
     console.log('KLIK LINK DI BAWAH INI UNTUK SCAN QR:');
     console.log(`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}&size=300x300`);
     console.log('-----------------------------------------------------\n');
 });
 
+// Event Bot Siap
 client.on('ready', () => {
-    console.log('Bot WhatsApp Ready.');
+    console.log('✅ Bot WhatsApp Ready dan Terhubung!');
 });
 
-// Handle incoming messages
+// Pantau semua pesan masuk di Log (Penting untuk debugging)
+client.on('message_create', (msg) => {
+    if (msg.fromMe) return;
+    console.log(`📩 Pesan Masuk dari: ${msg.from} | Isi: ${msg.body}`);
+});
+
+// Handle incoming messages untuk balasan otomatis
 client.on('message', async (msg) => {
+    // Abaikan status, grup, dan pesan dari diri sendiri
     if (msg.from === 'status@broadcast' || msg.from.includes('@g.us') || msg.fromMe) return;
 
     const text = msg.body;
     const textLower = text.toLowerCase();
 
+    // Logika deteksi format laporan
     if (textLower.includes('nama pelapor:') && textLower.includes('detail gangguan')) {
         
         const baris = text.split('\n');
@@ -79,37 +89,31 @@ client.on('message', async (msg) => {
             await msg.reply(`⏳ *Sedang memproses laporan ke GLPI...*\n\n✅ Data terbaca:\n👤 Nama: ${nama}\n🏢 Unit: ${divisi}\n📝 Keluhan: ${keluhan}\n🏷️ *Kategori:* ${kategori}`);
 
             try {
-                const glpiUrl = process.env.GLPI_URL;
-                const appToken = process.env.GLPI_APP_TOKEN;
-                const userToken = process.env.GLPI_USER_TOKEN;
-
-                const response = await axios.post(glpiUrl, {
+                const response = await axios.post(process.env.GLPI_URL, {
                     nama_pelapor: nama,
                     unit_divisi: divisi,
                     detail_keluhan: keluhan,
                     kategori_sistem: kategori
                 }, {
                     headers: {
-                        'App-Token': appToken,
-                        'Authorization': `user_token ${userToken}`
+                        'App-Token': process.env.GLPI_APP_TOKEN,
+                        'Authorization': `user_token ${process.env.GLPI_USER_TOKEN}`
                     }
                 });
 
-                const nomorTiket = response.data.id || response.data.ticket_id || "TEREKAM DI SISTEM";
-
+                const nomorTiket = response.data.id || response.data.ticket_id || "TEREKAM";
                 msg.reply(`✅ *LAPORAN BERHASIL DIBUAT!*\n\n🎫 Nomor Tiket GLPI: *${nomorTiket}*\n\nTim IT akan segera menindaklanjuti kendala Anda.`);
-                console.log(`Laporan dari ${nama} berhasil dikirim.`);
+                console.log(`🚀 Laporan sukses dikirim ke GLPI untuk ${nama}`);
 
             } catch (error) {
-                console.log('Error API GLPI:', error.message);
+                console.log('❌ Error API GLPI:', error.message);
                 msg.reply('❌ *Maaf, sistem GLPI sedang tidak dapat dijangkau.* \nMohon hubungi tim IT secara manual.');
             }
-
         } else {
             msg.reply('❌ Maaf, isian belum lengkap. Pastikan Nama, Keluhan, dan Unit sudah diisi semua.');
         }
-
     } else {
+        // Balasan jika tidak sesuai format
         msg.reply(`Halo! Untuk mempermudah pelaporan IT, silakan *copy-paste* pesan di bawah ini, isi data Anda, lalu kirimkan kembali:\n\nNama Pelapor:\nDetail Gangguan/ keluhan:\nunit / divisi:`);
     }
 });
