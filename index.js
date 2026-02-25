@@ -12,18 +12,17 @@ function tentukanKategori(keluhan) {
     return 'Lainnya'; 
 }
 
-// Inisialisasi WhatsApp Client - Konfigurasi Paling Tangguh
+// Inisialisasi WhatsApp Client - Konfigurasi Tanpa executablePath (Lebih Stabil di Cloud)
 const client = new Client({
     authStrategy: new LocalAuth(),
-    takeoverOnConflict: true, // Mengambil alih koneksi jika terputus/dijeda
-    authTimeoutMs: 60000, // Memberi waktu 1 menit untuk proses login
+    takeoverOnConflict: true, 
+    authTimeoutMs: 60000, 
     webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
     },
     puppeteer: {
         handleSIGTERM: false,
-        executablePath: '/usr/bin/google-chrome-stable', // Memaksa server menggunakan Chrome yang terinstall
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -60,13 +59,11 @@ client.on('message_create', (msg) => {
 
 // Handle incoming messages untuk balasan otomatis
 client.on('message', async (msg) => {
-    // Abaikan status, grup, dan pesan dari diri sendiri
     if (msg.from === 'status@broadcast' || msg.from.includes('@g.us') || msg.fromMe) return;
 
     const text = msg.body;
     const textLower = text.toLowerCase();
 
-    // Logika deteksi format laporan
     if (textLower.includes('nama pelapor:') && textLower.includes('detail gangguan')) {
         
         const baris = text.split('\n');
@@ -113,7 +110,6 @@ client.on('message', async (msg) => {
             msg.reply('❌ Maaf, isian belum lengkap. Pastikan Nama, Keluhan, dan Unit sudah diisi semua.');
         }
     } else {
-        // Balasan jika tidak sesuai format
         msg.reply(`Halo! Untuk mempermudah pelaporan IT, silakan *copy-paste* pesan di bawah ini, isi data Anda, lalu kirimkan kembali:\n\nNama Pelapor:\nDetail Gangguan/ keluhan:\nunit / divisi:`);
     }
 });
