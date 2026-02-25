@@ -12,10 +12,19 @@ function tentukanKategori(keluhan) {
     return 'Lainnya'; 
 }
 
-// Inisialisasi WhatsApp Client
-const client = new Client({ authStrategy: new LocalAuth() });
+// Inisialisasi WhatsApp Client (DIPERBAIKI UNTUK CLOUD/RAILWAY)
+const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        // Ini kunci biar nggak error 'failed to launch browser' di Linux/Railway
+        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        // Ini jalur standar Google Chrome di Docker image yang kita pakai
+        executablePath: '/usr/bin/google-chrome-stable',
+    }
+});
 
 client.on('qr', (qr) => {
+    // Generate QR di log Railway
     qrcode.generate(qr, { small: true });
     console.log('Scan QR Code di WhatsApp Anda.');
 });
@@ -26,19 +35,16 @@ client.on('ready', () => {
 
 // Handle incoming messages
 client.on('message', async (msg) => {
-    // Abaikan pesan dari status, grup, atau bot sendiri
     if (msg.from === 'status@broadcast' || msg.from.includes('@g.us') || msg.fromMe) return;
 
     const text = msg.body;
     const textLower = text.toLowerCase();
 
-    // Cek format laporan
     if (textLower.includes('nama pelapor:') && textLower.includes('detail gangguan')) {
         
         const baris = text.split('\n');
         let nama = ''; let keluhan = ''; let divisi = '';
 
-        // Ekstrak data dari pesan
         baris.forEach(b => {
             const bLower = b.toLowerCase();
             if (bLower.startsWith('nama pelapor:')) {
@@ -50,14 +56,12 @@ client.on('message', async (msg) => {
             }
         });
 
-        // Validasi kelengkapan data
         if (nama && keluhan && divisi) {
             const kategori = tentukanKategori(keluhan);
 
             await msg.reply(`⏳ *Sedang memproses laporan ke GLPI...*\n\n✅ Data terbaca:\n👤 Nama: ${nama}\n🏢 Unit: ${divisi}\n📝 Keluhan: ${keluhan}\n🏷️ *Kategori:* ${kategori}`);
 
             try {
-                // Kirim payload ke API GLPI
                 const glpiUrl = process.env.GLPI_URL;
                 const appToken = process.env.GLPI_APP_TOKEN;
                 const userToken = process.env.GLPI_USER_TOKEN;
@@ -74,7 +78,6 @@ client.on('message', async (msg) => {
                     }
                 });
 
-                // Ambil ID tiket dari response GLPI
                 const nomorTiket = response.data.id || response.data.ticket_id || "TEREKAM DI SISTEM";
 
                 msg.reply(`✅ *LAPORAN BERHASIL DIBUAT!*\n\n🎫 Nomor Tiket GLPI: *${nomorTiket}*\n\nTim IT akan segera menindaklanjuti kendala Anda.`);
@@ -90,7 +93,6 @@ client.on('message', async (msg) => {
         }
 
     } else {
-        // Balas dengan template baku
         msg.reply(`Halo! Untuk mempermudah pelaporan IT, silakan *copy-paste* pesan di bawah ini, isi data Anda, lalu kirimkan kembali:\n\nNama Pelapor:\nDetail Gangguan/ keluhan:\nunit / divisi:`);
     }
 });
