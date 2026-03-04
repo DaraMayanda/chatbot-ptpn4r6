@@ -1,27 +1,15 @@
-const { Client, LocalAuth } = require('whatsapp-web.js');
+const { Client, LocalAuth, List } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 require('dotenv').config();
 
-// Objek untuk menyimpan sementara data laporan (Session)
-const sessionData = {};
-
-// Daftar Unit Resmi sesuai permintaan Mentor
-const daftarUnit = {
-    "1": "Sekretariat & Hukum",
-    "2": "SDM dan Manajemen Sistem",
-    "3": "Tanaman",
-    "4": "Teknik",
-    "5": "Akuntansi dan Keuangan",
-    "6": "Pengadaan dan TI"
-};
-
+// Fungsi klasifikasi kategori keluhan (Tetap sama)
 function tentukanKategori(keluhan) {
     const teks = keluhan.toLowerCase();
     if (teks.match(/wifi|internet|jaringan|kabel|koneksi|lan/)) return 'Jaringan';
     if (teks.match(/printer|komputer|layar|keyboard|pc|laptop|mouse|tinta/)) return 'Hardware';
     if (teks.match(/aplikasi|error|login|sistem|password|erp|akun/)) return 'Software';
-    return 'Lainnya';
+    return 'Lainnya'; 
 }
 
 const client = new Client({
@@ -38,78 +26,89 @@ client.on('qr', (qr) => {
 });
 
 client.on('ready', () => {
-    console.log('✅ Bot WhatsApp Ready dengan Alur Pilihan Unit!');
+    console.log('✅ Bot WhatsApp Ready - Model Simpel Klik!');
 });
 
 client.on('message', async (msg) => {
     if (msg.from === 'status@broadcast' || msg.from.includes('@g.us') || msg.fromMe) return;
 
-    const chat = msg.body.trim();
-    const userId = msg.from;
+    const text = msg.body;
+    const textLower = text.toLowerCase();
 
-    // 1. JIKA BELUM ADA SESSION (Tahap Awal - Pilih Unit)
-    if (!sessionData[userId]) {
-        sessionData[userId] = { step: 'pilih_unit' };
-        
-        let pesanUnit = "Halo! Selamat datang di Layanan Mandiri IT PTPN.\n\nSilakan *PILIH UNIT* Anda dengan mengetik nomornya:\n";
-        for (const [key, value] of Object.entries(daftarUnit)) {
-            pesanUnit += `\n*${key}*. ${value}`;
-        }
-        return msg.reply(pesanUnit);
+    // 1. TAHAP AWAL: JIKA USER CHAT BIASA, KASIH LIST PILIHAN UNIT (KLIK)
+    const daftarUnitResmi = [
+        "Sekretariat & Hukum",
+        "SDM dan Manajemen Sistem",
+        "Tanaman",
+        "Teknik",
+        "Akuntansi dan Keuangan",
+        " Pengadaan dan TI"
+    ];
+
+    // Cek apakah user mengirim pesan yang bukan format laporan
+    if (!textLower.includes('nama pelapor:') && !daftarUnitResmi.includes(text)) {
+        const sections = [{
+            title: 'Silakan Pilih Unit Anda',
+            rows: daftarUnitResmi.map(unit => ({ title: unit }))
+        }];
+
+        const list = new List(
+            'Halo! Selamat datang di Layanan IT PTPN.\nSilakan klik tombol di bawah untuk memilih Unit Anda:',
+            'Pilih Unit',
+            sections,
+            'Daftar Unit Resmi'
+        );
+
+        return client.sendMessage(msg.from, list);
     }
 
-    const currentStep = sessionData[userId].step;
+    // 2. TAHAP KEDUA: JIKA USER KLIK UNIT, KASIH FORMAT COPY-PASTE (UNIT SUDAH TERISI)
+    if (daftarUnitResmi.includes(text)) {
+        return msg.reply(`Terima kasih! Sekarang silakan *copy-paste* pesan di bawah ini, isi data Anda, lalu kirimkan kembali:\n\nNama Pelapor:\nDetail Gangguan/ keluhan:\nunit / divisi: ${text}`);
+    }
 
-    // 2. PROSES TAHAP PILIH UNIT
-    if (currentStep === 'pilih_unit') {
-        if (daftarUnit[chat]) {
-            sessionData[userId].unit = daftarUnit[chat];
-            sessionData[userId].step = 'isi_nama';
-            return msg.reply(`Anda memilih unit: *${daftarUnit[chat]}*\n\nSekarang, silakan ketik *NAMA LENGKAP* pelapor:`);
+    // 3. TAHAP KETIGA: PROSES LAPORAN (SEKALI KIRIM KAYA AWAL)
+    if (textLower.includes('nama pelapor:') && textLower.includes('detail gangguan')) {
+        const baris = text.split('\n');
+        let nama = ''; let keluhan = ''; let divisi = '';
+
+        baris.forEach(b => {
+            const bLower = b.toLowerCase();
+            if (bLower.includes('nama pelapor:')) {
+                nama = b.substring(b.indexOf(':') + 1).trim();
+            } else if (bLower.includes('detail gangguan') || bLower.includes('keluhan:')) {
+                keluhan = b.substring(b.indexOf(':') + 1).trim();
+            } else if (bLower.includes('unit') || bLower.includes('divisi')) {
+                divisi = b.substring(b.indexOf(':') + 1).trim();
+            }
+        });
+
+        if (nama && keluhan && divisi) {
+            const kategori = tentukanKategori(keluhan);
+            await msg.reply(`⏳ *Sedang memproses laporan ke GLPI...*\n\n✅ Data terbaca:\n👤 Nama: ${nama}\n🏢 Unit: ${divisi}\n📝 Keluhan: ${keluhan}\n🏷️ *Kategori:* ${kategori}`);
+
+            try {
+                const response = await axios.post(process.env.GLPI_URL, {
+                    nama_pelapor: nama,
+                    unit_divisi: divisi,
+                    detail_keluhan: keluhan,
+                    kategori_sistem: kategori
+                }, {
+                    headers: {
+                        'App-Token': process.env.GLPI_APP_TOKEN,
+                        'Authorization': `user_token ${process.env.GLPI_USER_TOKEN}`
+                    }
+                });
+
+                const nomorTiket = response.data.id || "TEREKAM";
+                msg.reply(`✅ *LAPORAN BERHASIL!*\n\n🎫 Nomor Tiket: *${nomorTiket}*`);
+            } catch (error) {
+                console.log('❌ Error API:', error.message);
+                msg.reply('❌ *Maaf, sistem GLPI sedang tidak dapat dijangkau.*');
+            }
         } else {
-            return msg.reply("❌ Pilihan salah. Silakan ketik angka *1 sampai 6* sesuai daftar di atas.");
+            msg.reply('❌ Maaf, isian belum lengkap.');
         }
-    }
-
-    // 3. PROSES TAHAP ISI NAMA
-    if (currentStep === 'isi_nama') {
-        sessionData[userId].nama = chat;
-        sessionData[userId].step = 'isi_keluhan';
-        return msg.reply(`Halo *${chat}*,\n\nTerakhir, silakan jelaskan *DETAIL GANGGUAN* atau keluhan Anda:`);
-    }
-
-    // 4. PROSES TAHAP ISI KELUHAN & KIRIM KE GLPI
-    if (currentStep === 'isi_keluhan') {
-        const dataUser = sessionData[userId];
-        const keluhan = chat;
-        const kategori = tentukanKategori(keluhan);
-
-        await msg.reply(`⏳ *Sedang memproses tiket ke GLPI...*\n\n📍 Unit: ${dataUser.unit}\n👤 Nama: ${dataUser.nama}\n📝 Keluhan: ${keluhan}\n🏷️ Kategori: ${kategori}`);
-
-        try {
-            const response = await axios.post(process.env.GLPI_URL, {
-                nama_pelapor: dataUser.nama,
-                unit_divisi: dataUser.unit,
-                detail_keluhan: keluhan,
-                kategori_sistem: kategori
-            }, {
-                headers: {
-                    'App-Token': process.env.GLPI_APP_TOKEN,
-                    'Authorization': `user_token ${process.env.GLPI_USER_TOKEN}`
-                }
-            });
-
-            const nomorTiket = response.data.id || "TEREKAM";
-            msg.reply(`✅ *LAPORAN BERHASIL!*\n\n🎫 Nomor Tiket: *${nomorTiket}*\n\nTerima kasih, mohon tunggu tindak lanjut dari tim IT.`);
-            console.log(`🚀 Tiket sukses untuk ${dataUser.nama} (${dataUser.unit})`);
-
-        } catch (error) {
-            console.log('❌ Error API GLPI:', error.message);
-            msg.reply('❌ *Sistem GLPI sedang maintenance.* Laporan Anda sudah tercatat di sistem internal kami sementara.');
-        }
-
-        // Hapus session setelah selesai agar user bisa lapor lagi dari awal
-        delete sessionData[userId];
     }
 });
 
