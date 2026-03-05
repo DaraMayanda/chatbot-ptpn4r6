@@ -1,9 +1,9 @@
-const { Client, LocalAuth, List } = require('whatsapp-web.js'); // Tambah List di sini
+const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 require('dotenv').config();
 
-// Fungsi klasifikasi kategori keluhan (Tetap pakai kodemu)
+// Fungsi klasifikasi kategori keluhan
 function tentukanKategori(keluhan) {
     const teks = keluhan.toLowerCase();
     if (teks.match(/wifi|internet|jaringan|kabel|koneksi|lan/)) return 'Jaringan';
@@ -12,79 +12,80 @@ function tentukanKategori(keluhan) {
     return 'Lainnya'; 
 }
 
+// Inisialisasi WhatsApp Client
 const client = new Client({
     authStrategy: new LocalAuth(),
+    takeoverOnConflict: true, 
+    authTimeoutMs: 60000, 
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+    },
     puppeteer: {
         handleSIGTERM: false,
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process', 
+            '--disable-gpu'
+        ],
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
     }
 });
 
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
+    console.log('\n-----------------------------------------------------');
+    console.log('KLIK LINK DI BAWAH INI UNTUK SCAN QR:');
+    console.log(`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}&size=300x300`);
+    console.log('-----------------------------------------------------\n');
 });
 
 client.on('ready', () => {
-    console.log('✅ Bot WhatsApp Ready - Versi Klik & Copy-Paste!');
+    console.log('✅ Bot WhatsApp Ready dan Terhubung!');
 });
 
-
-const daftarUnitResmi = [
-    "Sekretariat & Hukum",
-    "SDM dan Manajemen Sistem",
-    "Tanaman",
-    "Teknik",
-    "Akuntansi dan Keuangan",
-    "Pengadaan dan TI"
-];
+const daftarUnit = {
+    "1": "Sekretariat & Hukum",
+    "2": "SDM dan Manajemen Sistem",
+    "3": "Tanaman",
+    "4": "Teknik",
+    "5": "Akuntansi dan Keuangan",
+    "6": "Pengadaan dan TI"
+};
 
 client.on('message', async (msg) => {
     if (msg.from === 'status@broadcast' || msg.from.includes('@g.us') || msg.fromMe) return;
 
-    const text = msg.body;
+    const text = msg.body.trim();
     const textLower = text.toLowerCase();
 
-    // 1. JIKA USER CHAT "TES" ATAU APA SAJA (Bukan laporan) -> KASIH LIST KLIK
-    if (!textLower.includes('nama pelapor:') && !daftarUnitResmi.includes(text)) {
-        const rows = daftarUnitResmi.map(unit => ({ title: unit }));
-        
-        const list = new List(
-            'Halo! Selamat datang di Layanan IT PTPN.\nSilakan klik tombol di bawah untuk memilih unit Anda:',
-            'Pilih Unit',
-            [{ title: 'Daftar Unit Resmi', rows: rows }],
-            'Layanan Mandiri IT'
-        );
-
-        return client.sendMessage(msg.from, list);
-    }
-
-    // 2. JIKA USER KLIK SALAH SATU UNIT -> KASIH FORMAT COPY-PASTE (DENGAN NAMA UNIT TERISI)
-    if (daftarUnitResmi.includes(text)) {
-        return msg.reply(`Unit terpilih: *${text}*\n\nSilakan *copy-paste* pesan di bawah ini, isi Nama dan Keluhan Anda, lalu kirimkan kembali:\n\nNama Pelapor:\nDetail Gangguan/ keluhan:\nunit / divisi: ${text}`);
-    }
-
-    // 3. JIKA USER MENGIRIM FORMAT LAPORAN (Logika awalmu kembali bekerja)
     if (textLower.includes('nama pelapor:') && textLower.includes('detail gangguan')) {
         const baris = text.split('\n');
         let nama = ''; let keluhan = ''; let divisi = '';
 
         baris.forEach(b => {
             const bLower = b.toLowerCase();
-            if (bLower.includes('nama pelapor:')) {
-                nama = b.substring(b.indexOf(':') + 1).trim();
+            if (bLower.startsWith('nama pelapor:')) {
+                nama = b.substring(bLower.indexOf(':') + 1).trim();
             } else if (bLower.includes('detail gangguan') || bLower.includes('keluhan:')) {
-                keluhan = b.substring(b.indexOf(':') + 1).trim();
+                keluhan = b.substring(bLower.indexOf(':') + 1).trim();
             } else if (bLower.includes('unit') || bLower.includes('divisi')) {
-                divisi = b.substring(b.indexOf(':') + 1).trim();
+                divisi = b.substring(bLower.indexOf(':') + 1).trim();
             }
         });
 
         if (nama && keluhan && divisi) {
             const kategori = tentukanKategori(keluhan);
+
+        
             await msg.reply(`⏳ *Sedang memproses laporan ke GLPI...*\n\n✅ Data terbaca:\n👤 Nama: ${nama}\n🏢 Unit: ${divisi}\n📝 Keluhan: ${keluhan}\n🏷️ *Kategori:* ${kategori}`);
 
             try {
-                // Kirim ke API GLPI sesuai kodemu
                 const response = await axios.post(process.env.GLPI_URL, {
                     nama_pelapor: nama,
                     unit_divisi: divisi,
@@ -97,16 +98,32 @@ client.on('message', async (msg) => {
                     }
                 });
 
-                const nomorTiket = response.data.id || "TEREKAM";
-                msg.reply(`✅ *LAPORAN BERHASIL DIBUAT!*\n\n🎫 Nomor Tiket GLPI: *${nomorTiket}*`);
+                const nomorTiket = response.data.id || response.data.ticket_id || "TEREKAM";
+                msg.reply(`✅ *LAPORAN BERHASIL DIBUAT!*\n\n🎫 Nomor Tiket GLPI: *${nomorTiket}*\n\nTim IT akan segera menindaklanjuti kendala Anda.`);
+                console.log(`🚀 Laporan sukses dikirim ke GLPI untuk ${nama}`);
+
             } catch (error) {
-                console.log('❌ Error API:', error.message);
-                msg.reply('❌ *Maaf, sistem GLPI sedang tidak dapat dijangkau.*');
+                console.log('❌ Error API GLPI:', error.message);
+                msg.reply('❌ *Maaf, sistem GLPI sedang tidak dapat dijangkau.* \nMohon hubungi tim IT secara manual.');
             }
         } else {
-            msg.reply('❌ Maaf, isian belum lengkap. Pastikan Nama dan Keluhan sudah diisi.');
+            msg.reply('❌ Maaf, isian belum lengkap. Pastikan Nama, Keluhan, dan Unit sudah diisi semua.');
         }
+        return; 
     }
+
+    
+    if (daftarUnit[text]) {
+        const namaUnit = daftarUnit[text];
+        return msg.reply(`Terima kasih. Silakan *copy-paste* pesan di bawah ini, isi Nama dan Keluhan Anda, lalu kirimkan kembali:\n\nNama Pelapor: \nDetail Gangguan: \nUnit / Divisi: ${namaUnit}`);
+    }
+
+    
+    let pesanMenu = "Halo! Selamat datang di Layanan IT PTPN.\n\nSesuai prosedur, silakan pilih *Unit/Divisi* Anda dengan membalas *ANGKA* di bawah ini:\n";
+    for (const [key, value] of Object.entries(daftarUnit)) {
+        pesanMenu += `\n*${key}*. ${value}`;
+    }
+    msg.reply(pesanMenu);
 });
 
 client.initialize();
