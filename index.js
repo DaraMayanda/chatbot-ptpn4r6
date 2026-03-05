@@ -17,37 +17,22 @@ const client = new Client({
     authStrategy: new LocalAuth(),
     takeoverOnConflict: true, 
     authTimeoutMs: 60000, 
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-    },
     puppeteer: {
         handleSIGTERM: false,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--single-process', 
-            '--disable-gpu'
-        ],
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote', '--single-process', '--disable-gpu'],
         userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
     }
 });
 
 client.on('qr', (qr) => {
     qrcode.generate(qr, { small: true });
-    console.log('\n-----------------------------------------------------');
-    console.log('KLIK LINK DI BAWAH INI UNTUK SCAN QR:');
-    console.log(`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(qr)}&size=300x300`);
-    console.log('-----------------------------------------------------\n');
+    console.log('QR Code silakan di-scan...');
 });
 
 client.on('ready', () => {
-    console.log('✅ Bot WhatsApp Ready dan Terhubung!');
+    console.log('✅ Bot WhatsApp Ready - Versi One-Shot Mapping!');
 });
+
 
 const daftarUnit = {
     "1": "Sekretariat & Hukum",
@@ -61,34 +46,46 @@ const daftarUnit = {
 client.on('message', async (msg) => {
     if (msg.from === 'status@broadcast' || msg.from.includes('@g.us') || msg.fromMe) return;
 
-    const text = msg.body.trim();
+    const text = msg.body;
     const textLower = text.toLowerCase();
 
-    if (textLower.includes('nama pelapor:') && textLower.includes('detail gangguan')) {
-        const baris = text.split('\n');
-        let nama = ''; let keluhan = ''; let divisi = '';
 
+    if (textLower.includes('nama pelapor:') && (textLower.includes('detail gangguan') || textLower.includes('keluhan:'))) {
+        
+        const baris = text.split('\n');
+        let nama = ''; let keluhan = ''; let kodeDivisi = '';
+
+       
         baris.forEach(b => {
             const bLower = b.toLowerCase();
-            if (bLower.startsWith('nama pelapor:')) {
-                nama = b.substring(bLower.indexOf(':') + 1).trim();
+            if (bLower.includes('nama pelapor:')) {
+                nama = b.substring(b.indexOf(':') + 1).trim();
             } else if (bLower.includes('detail gangguan') || bLower.includes('keluhan:')) {
-                keluhan = b.substring(bLower.indexOf(':') + 1).trim();
+                keluhan = b.substring(b.indexOf(':') + 1).trim();
             } else if (bLower.includes('unit') || bLower.includes('divisi')) {
-                divisi = b.substring(bLower.indexOf(':') + 1).trim();
+               
+                kodeDivisi = b.substring(b.indexOf(':') + 1).trim().replace(/[^0-9]/g, ''); 
             }
         });
 
-        if (nama && keluhan && divisi) {
+        if (nama && keluhan && kodeDivisi) {
+            
+            const divisiAsli = daftarUnit[kodeDivisi];
+
+            if (!divisiAsli) {
+                return msg.reply('❌ Angka Unit/Divisi tidak valid. Harap isi kolom Unit/Divisi dengan angka *1 sampai 6* saja.');
+            }
+
             const kategori = tentukanKategori(keluhan);
 
         
-            await msg.reply(`⏳ *Sedang memproses laporan ke GLPI...*\n\n✅ Data terbaca:\n👤 Nama: ${nama}\n🏢 Unit: ${divisi}\n📝 Keluhan: ${keluhan}\n🏷️ *Kategori:* ${kategori}`);
+            await msg.reply(`⏳ *Sedang memproses laporan ke GLPI...*\n\n✅ Data terbaca:\n👤 Nama: ${nama}\n🏢 Unit: ${divisiAsli}\n📝 Keluhan: ${keluhan}\n🏷️ *Kategori:* ${kategori}`);
 
             try {
+                // Kirim ke API GLPI
                 const response = await axios.post(process.env.GLPI_URL, {
                     nama_pelapor: nama,
-                    unit_divisi: divisi,
+                    unit_divisi: divisiAsli, 
                     detail_keluhan: keluhan,
                     kategori_sistem: kategori
                 }, {
@@ -100,30 +97,19 @@ client.on('message', async (msg) => {
 
                 const nomorTiket = response.data.id || response.data.ticket_id || "TEREKAM";
                 msg.reply(`✅ *LAPORAN BERHASIL DIBUAT!*\n\n🎫 Nomor Tiket GLPI: *${nomorTiket}*\n\nTim IT akan segera menindaklanjuti kendala Anda.`);
-                console.log(`🚀 Laporan sukses dikirim ke GLPI untuk ${nama}`);
 
             } catch (error) {
                 console.log('❌ Error API GLPI:', error.message);
                 msg.reply('❌ *Maaf, sistem GLPI sedang tidak dapat dijangkau.* \nMohon hubungi tim IT secara manual.');
             }
         } else {
-            msg.reply('❌ Maaf, isian belum lengkap. Pastikan Nama, Keluhan, dan Unit sudah diisi semua.');
+            msg.reply('❌ Maaf, isian belum lengkap. Pastikan Nama, Keluhan, dan Angka Unit sudah diisi.');
         }
-        return; 
-    }
 
-    
-    if (daftarUnit[text]) {
-        const namaUnit = daftarUnit[text];
-        return msg.reply(`Terima kasih. Silakan *copy-paste* pesan di bawah ini, isi Nama dan Keluhan Anda, lalu kirimkan kembali:\n\nNama Pelapor: \nDetail Gangguan: \nUnit / Divisi: ${namaUnit}`);
+    } else {
+        
+        msg.reply(`Halo! Selamat datang di Layanan IT PTPN.\n\nUntuk mempermudah pelaporan, silakan *copy-paste* pesan di bawah ini dan isi data Anda.\n\n*Daftar Unit/Divisi:*\n*1*. Sekretariat & Hukum\n*2*. SDM dan Manajemen Sistem\n*3*. Tanaman\n*4*. Teknik\n*5*. Akuntansi dan Keuangan\n*6*. Pengadaan dan TI\n\n--------------------------\n\nNama Pelapor: \nDetail Gangguan: \nUnit / Divisi (Isi dengan Angka 1-6): `);
     }
-
-    
-    let pesanMenu = "Halo! Selamat datang di Layanan IT PTPN.\n\nSesuai prosedur, silakan pilih *Unit/Divisi* Anda dengan membalas *ANGKA* di bawah ini:\n";
-    for (const [key, value] of Object.entries(daftarUnit)) {
-        pesanMenu += `\n*${key}*. ${value}`;
-    }
-    msg.reply(pesanMenu);
 });
 
 client.initialize();
